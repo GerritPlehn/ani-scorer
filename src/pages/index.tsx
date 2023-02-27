@@ -1,7 +1,16 @@
+import { MediaList } from '@/types/anilist'
 import { signIn, signOut, useSession } from 'next-auth/react'
+import { VotingBox } from '@/components/VotingBox'
+import { useState } from 'react'
 
 const Index = () => {
   const { data: session } = useSession()
+  const [media, setMedia] = useState<MediaList>()
+
+  const getMedia = async (params: { token?: string; userId: number }) => {
+    const media = await getList(params)
+    setMedia(media)
+  }
 
   return (
     <div>
@@ -10,10 +19,10 @@ const Index = () => {
         <div>
           <button onClick={() => signOut()}>Sign out ({session.user?.name})</button>
 
-          <button onClick={() => getList({ token: session.accessToken, userId: session.user.id })}>
+          <button onClick={() => getMedia({ token: session.accessToken, userId: session.user.id })}>
             Get WatchList
           </button>
-          <div>({JSON.stringify(session)})</div>
+          {!media ? null : <VotingBox media1={media[0].media} media2={media[1].media} />}
         </div>
       )}
     </div>
@@ -31,23 +40,13 @@ query ($page: Int, $userId: Int, $type: MediaType, $status: MediaListStatus ) {
     mediaList (status: $status, type: $type, userId: $userId) {
       status
       score(format: POINT_100)
-      progress
-      progressVolumes
-      notes
       media {
         siteUrl
         id
-        idMal
-        episodes
-        chapters
-        volumes
-        status
-        averageScore
         coverImage{
           large
           extraLarge
         }
-        bannerImage
         title {
           userPreferred
         }
@@ -57,22 +56,24 @@ query ($page: Int, $userId: Int, $type: MediaType, $status: MediaListStatus ) {
 }
 `
 
-const getList = async (params: { token?: string; userId?: number }) => {
-  const { userId, token } = params
+const getList = async (params: { token?: string; userId?: number; page?: number }): Promise<MediaList> => {
+  let { userId, token, page } = params
+  if (!page) {
+    page = 1
+  }
   if (!token || !userId) {
-    console.error('Not logged in')
-    return
+    throw new Error('Not logged in')
   }
 
+  const animes: MediaList = []
+
   const variables = {
-    page: 1,
+    page,
     userId: userId,
     type: 'ANIME',
     status: 'COMPLETED',
     sort: null,
   }
-
-  console.log(typeof variables.userId)
 
   const listRequest = await fetch(apiUrl, {
     body: JSON.stringify({
@@ -86,9 +87,16 @@ const getList = async (params: { token?: string; userId?: number }) => {
       Accept: 'application/json',
     },
   })
+
   const listResponse = await listRequest.json()
-  console.log(listResponse)
-  return listRequest
+
+  animes.push(...listResponse.data.Page.mediaList)
+  if (listResponse.data.Page.pageInfo.hasNextPage) {
+    page++
+    animes.push(...(await getList({ userId, token, page })))
+  }
+  console.log(animes)
+  return animes
 }
 
 export default Index
